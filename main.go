@@ -41,13 +41,17 @@ func main() {
 		}
 
 		// Admin kontrolü
-		member, err := bot.GetChatMember(tgbotapi.ChatConfigWithUser{
-			ChatID: update.Message.Chat.ID,
-			UserID: update.Message.From.ID,
-		})
-		if err != nil {
-			continue
-		}
+config := tgbotapi.GetChatMemberConfig{
+    ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
+        ChatID: update.Message.Chat.ID,
+        UserID: update.Message.From.ID,
+    },
+}
+
+member, err := bot.GetChatMember(config)
+if err != nil {
+    continue
+}
 
 		if member.Status != "administrator" && member.Status != "creator" {
 			continue
