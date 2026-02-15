@@ -27,6 +27,13 @@ func main() {
 
 	log.Printf("Bot başlatıldı: %s", bot.Self.UserName)
 
+	// ✅ Health endpoint (UptimeRobot için)
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	// Webhook URL oluştur
 	webhookURL := os.Getenv("RENDER_EXTERNAL_URL") + "/webhook"
 
 	wh, err := tgbotapi.NewWebhook(webhookURL)
@@ -39,12 +46,16 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Webhook endpoint
 	updates := bot.ListenForWebhook("/webhook")
 
+	// HTTP server başlat
 	go func() {
+		log.Printf("HTTP server %s portunda başlatıldı", port)
 		log.Fatal(http.ListenAndServe(":"+port, nil))
 	}()
 
+	// Update loop
 	for update := range updates {
 
 		if update.Message == nil {
@@ -83,6 +94,9 @@ func main() {
 			msg.ReplyToMessageID = update.Message.ReplyToMessage.MessageID
 		}
 
-		bot.Send(msg)
+		_, err = bot.Send(msg)
+		if err != nil {
+			log.Println("Mesaj gönderilemedi:", err)
+		}
 	}
 }
