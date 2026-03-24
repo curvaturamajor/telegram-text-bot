@@ -17,7 +17,6 @@ import (
 
 const OWNER_ID int64 = 7350150331
 
-// parseMessageLink converts t.me link to chatID and messageID
 func parseMessageLink(link string) (int64, int, error) {
 	parts := strings.Split(link, "/")
 	if len(parts) < 2 {
@@ -34,14 +33,13 @@ func parseMessageLink(link string) (int64, int, error) {
 	return chatID, msgID, nil
 }
 
-// Reaction request payload for Telegram API
 type reactionReq struct {
 	ChatID    int64       `json:"chat_id"`
 	MessageID int         `json:"message_id"`
 	Reaction  interface{} `json:"reaction"`
 }
 
-// sendReaction uses raw HTTP to call setMessageReaction
+// sendReaction adds a reaction
 func sendReaction(botToken string, chatID int64, msgID int, emoji string) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/setMessageReaction", botToken)
 	body := reactionReq{
@@ -49,6 +47,25 @@ func sendReaction(botToken string, chatID int64, msgID int, emoji string) error 
 		MessageID: msgID,
 		Reaction: []map[string]string{
 			{"type": "emoji", "emoji": emoji},
+		},
+	}
+	data, _ := json.Marshal(body)
+	resp, err := http.Post(url, "application/json", bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
+// removeReaction removes all reactions
+func removeReaction(botToken string, chatID int64, msgID int) error {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/setMessageReaction", botToken)
+	body := reactionReq{
+		ChatID:    chatID,
+		MessageID: msgID,
+		Reaction: []map[string]string{
+			{"type": "remove_all"},
 		},
 	}
 	data, _ := json.Marshal(body)
@@ -70,7 +87,6 @@ func main() {
 		port = "10000"
 	}
 
-	// Optimized HTTP client
 	tr := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   5 * time.Second,
@@ -80,12 +96,8 @@ func main() {
 		MaxIdleConnsPerHost: 100,
 		IdleConnTimeout:     90 * time.Second,
 	}
-	client := &http.Client{
-		Transport: tr,
-		Timeout:   5 * time.Second,
-	}
+	client := &http.Client{Transport: tr, Timeout: 5 * time.Second}
 
-	// Bot API setup
 	bot, err := tgbotapi.NewBotAPIWithClient(token, tgbotapi.APIEndpoint, client)
 	if err != nil {
 		log.Fatal(err)
@@ -93,12 +105,8 @@ func main() {
 	bot.Debug = false
 	log.Println("Bot aktif:", bot.Self.UserName)
 
-	// Health check endpoint
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("OK"))
-	})
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("OK")) })
 
-	// Webhook setup
 	webhookURL := os.Getenv("RENDER_EXTERNAL_URL") + "/webhook"
 	bot.Request(tgbotapi.DeleteWebhookConfig{})
 	wh, _ := tgbotapi.NewWebhook(webhookURL)
@@ -113,14 +121,11 @@ func main() {
 	}
 	go func() { log.Fatal(server.ListenAndServe()) }()
 
-	// Update loop
 	for update := range updates {
 		msg := update.Message
 		if msg == nil || msg.From == nil {
 			continue
 		}
-
-		// Owner only
 		if msg.From.ID != OWNER_ID {
 			continue
 		}
@@ -132,7 +137,7 @@ func main() {
 
 		chatType := msg.Chat.Type
 
-		// DM reactions
+		// DM commands
 		if chatType == "private" {
 			var emoji, prefix string
 			switch {
@@ -144,6 +149,12 @@ func main() {
 				emoji, prefix = "👎", "/dislike"
 			case strings.HasPrefix(text, "/poop"):
 				emoji, prefix = "💩", "/poop"
+			case strings.HasPrefix(text, "/lol"):
+				emoji, prefix = "😁", "/lol"
+			case strings.HasPrefix(text, "/mid"):
+				emoji, prefix = "🖕", "/mid"
+			case strings.HasPrefix(text, "/ang"):
+				emoji, prefix = "😡", "/ang"
 			}
 
 			if emoji != "" {
@@ -157,10 +168,8 @@ func main() {
 					bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Geçersiz link"))
 					continue
 				}
-
 				go func() {
-					err = sendReaction(token, chatID, msgID, emoji)
-					if err != nil {
+					if err := sendReaction(token, chatID, msgID, emoji); err != nil {
 						bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Reaksiyon eklenemedi"))
 						return
 					}
@@ -168,29 +177,51 @@ func main() {
 				}()
 				continue
 			}
-		}
 
-		// DM delete
-		if chatType == "private" && strings.HasPrefix(text, "/del") {
-			link := strings.TrimSpace(text[4:])
-			if link == "" {
-				bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Link boş"))
-				continue
-			}
-			chatID, msgID, err := parseMessageLink(link)
-			if err != nil {
-				bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Geçersiz link"))
-				continue
-			}
-			go func() {
-				_, err := bot.Request(tgbotapi.DeleteMessageConfig{ChatID: chatID, MessageID: msgID})
-				if err != nil {
-					bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Silinemedi"))
-					return
+			// /unreact
+			if strings.HasPrefix(text, "/unreact") {
+				link := strings.TrimSpace(text[8:])
+				if link == "" {
+					bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Link boş"))
+					continue
 				}
-				bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "✅ Silindi"))
-			}()
-			continue
+				chatID, msgID, err := parseMessageLink(link)
+				if err != nil {
+					bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Geçersiz link"))
+					continue
+				}
+				go func() {
+					if err := removeReaction(token, chatID, msgID); err != nil {
+						bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Reaksiyon kaldırılamadı"))
+						return
+					}
+					bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "✅ Reaksiyon kaldırıldı"))
+				}()
+				continue
+			}
+
+			// /del
+			if strings.HasPrefix(text, "/del") {
+				link := strings.TrimSpace(text[4:])
+				if link == "" {
+					bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Link boş"))
+					continue
+				}
+				chatID, msgID, err := parseMessageLink(link)
+				if err != nil {
+					bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Geçersiz link"))
+					continue
+				}
+				go func() {
+					_, err := bot.Request(tgbotapi.DeleteMessageConfig{ChatID: chatID, MessageID: msgID})
+					if err != nil {
+						bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Silinemedi"))
+						return
+					}
+					bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "✅ Silindi"))
+				}()
+				continue
+			}
 		}
 
 		// Group /txt
