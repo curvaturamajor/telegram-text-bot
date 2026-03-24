@@ -68,7 +68,8 @@ func main() {
 		Timeout:   5 * time.Second,
 	}
 
-	bot, err := tgbotapi.NewBotAPIWithClient(token, client)
+	// 🔹 Render v5.5.1 uyumlu çağrı
+	bot, err := tgbotapi.NewBotAPIWithClient(token, tgbotapi.APIEndpoint, client)
 	if err != nil {
 		log.Fatal(err)
 	}
