@@ -39,7 +39,6 @@ type reactionReq struct {
 	Reaction  interface{} `json:"reaction"`
 }
 
-// sendReaction adds a reaction
 func sendReaction(botToken string, chatID int64, msgID int, emoji string) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/setMessageReaction", botToken)
 	body := reactionReq{
@@ -47,25 +46,6 @@ func sendReaction(botToken string, chatID int64, msgID int, emoji string) error 
 		MessageID: msgID,
 		Reaction: []map[string]string{
 			{"type": "emoji", "emoji": emoji},
-		},
-	}
-	data, _ := json.Marshal(body)
-	resp, err := http.Post(url, "application/json", bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return nil
-}
-
-// removeReaction removes all reactions
-func removeReaction(botToken string, chatID int64, msgID int) error {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/setMessageReaction", botToken)
-	body := reactionReq{
-		ChatID:    chatID,
-		MessageID: msgID,
-		Reaction: []map[string]string{
-			{"type": "remove_all"},
 		},
 	}
 	data, _ := json.Marshal(body)
@@ -137,7 +117,7 @@ func main() {
 
 		chatType := msg.Chat.Type
 
-		// DM commands
+		// DM reactions
 		if chatType == "private" {
 			var emoji, prefix string
 			switch {
@@ -174,28 +154,6 @@ func main() {
 						return
 					}
 					bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "✅ Reaksiyon eklendi"))
-				}()
-				continue
-			}
-
-			// /unreact
-			if strings.HasPrefix(text, "/unreact") {
-				link := strings.TrimSpace(text[8:])
-				if link == "" {
-					bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Link boş"))
-					continue
-				}
-				chatID, msgID, err := parseMessageLink(link)
-				if err != nil {
-					bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Geçersiz link"))
-					continue
-				}
-				go func() {
-					if err := removeReaction(token, chatID, msgID); err != nil {
-						bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "❌ Reaksiyon kaldırılamadı"))
-						return
-					}
-					bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "✅ Reaksiyon kaldırıldı"))
 				}()
 				continue
 			}
