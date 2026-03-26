@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -70,14 +68,11 @@ func main() {
 			if hasTGLink {
 				go func(cID int64, mID int) {
 					time.Sleep(7 * time.Minute)
-					// Mesajı sil
 					bot.Request(tgbotapi.DeleteMessageConfig{ChatID: cID, MessageID: mID})
 					
-					// Uyarıyı gönder
 					warn := tgbotapi.NewMessage(cID, "Yasaklı görsel kaldırıldı")
 					sentWarn, err := bot.Send(warn)
 					
-					// Uyarıyı da 30 saniye sonra sil (Grup temizliği için)
 					if err == nil {
 						time.Sleep(30 * time.Second)
 						bot.Request(tgbotapi.DeleteMessageConfig{ChatID: cID, MessageID: sentWarn.MessageID})
