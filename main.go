@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -17,13 +16,13 @@ var httpClient = &http.Client{}
 
 func sendReaction(token string, chatID int64, msgID int, emoji string) {
 	url := "https://api.telegram.org/bot" + token + "/setMessageReaction"
-	payload := fmt.Sprintf(`{"chat_id":%d,"message_id":%d,"reaction":[{"type":"emoji","emoji":"%s"}]}`, chatID, msgID, emoji)
+	// Sprintf yerine en hızlı manuel birleştirme
+	payload := `{"chat_id":` + strconv.FormatInt(chatID, 10) + `,"message_id":` + strconv.Itoa(msgID) + `,"reaction":[{"type":"emoji","emoji":"` + emoji + `"}]}`
 	
 	req, _ := http.NewRequest("POST", url, bytes.NewReader([]byte(payload)))
 	req.Header.Set("Content-Type", "application/json")
 	
-	resp, _ := httpClient.Do(req)
-	if resp != nil {
+	if resp, err := httpClient.Do(req); err == nil {
 		resp.Body.Close()
 	}
 }
@@ -43,7 +42,7 @@ func main() {
 	bot.Client = httpClient
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(200)
 	})
 
 	webhookURL := os.Getenv("RENDER_EXTERNAL_URL") + "/webhook"
@@ -63,31 +62,34 @@ func main() {
 		if len(text) < 3 || text[0] != '/' { continue }
 
 		parts := strings.SplitN(text, " ", 2)
+		if len(parts) < 2 { continue } // Panic koruması
 		cmd := parts[0]
 
-		// 1️⃣ /tt - (Eski /txt) Ultra Hızlı Yanıt
-		if cmd == "/tt" && len(parts) > 1 {
-			go func(cID int64, content string, rID int) {
-				m := tgbotapi.NewMessage(cID, content)
-				m.ReplyToMessageID = rID
+		// 1️⃣ /tt - Ultra Hızlı
+		if cmd == "/tt" {
+			rID := 0
+			if update.Message.ReplyToMessage != nil {
+				rID = update.Message.ReplyToMessage.MessageID
+			}
+			// Sadece gerekli verileri kopyalayarak goroutine başlat
+			go func(cID int64, txt string, reply int) {
+				m := tgbotapi.NewMessage(cID, txt)
+				m.ReplyToMessageID = reply
 				bot.Send(m)
-			}(update.Message.Chat.ID, parts[1], func() int {
-				if update.Message.ReplyToMessage != nil {
-					return update.Message.ReplyToMessage.MessageID
-				}
-				return 0
-			}())
+			}(update.Message.Chat.ID, parts[1], rID)
 			continue
 		}
 
 		// 2️⃣ DM Operasyonları
-		if update.Message.Chat.Type == "private" && len(parts) > 1 {
+		if update.Message.Chat.Type == "private" {
 			link := parts[1]
 
 			if cmd == "/del" {
 				go func(l string) {
 					cID, mID := parseMessageLink(l)
-					bot.Request(tgbotapi.DeleteMessageConfig{ChatID: cID, MessageID: mID})
+					if cID != 0 {
+						bot.Request(tgbotapi.DeleteMessageConfig{ChatID: cID, MessageID: mID})
+					}
 				}(link)
 				continue
 			}
@@ -106,7 +108,9 @@ func main() {
 			if emoji != "" {
 				go func(l, e string) {
 					cID, mID := parseMessageLink(l)
-					sendReaction(token, cID, mID, e)
+					if cID != 0 {
+						sendReaction(token, cID, mID, e)
+					}
 				}(link, emoji)
 			}
 		}
