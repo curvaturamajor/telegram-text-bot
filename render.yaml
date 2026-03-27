@@ -1,12 +1,13 @@
 services:
   - type: web
     name: telegram-text-bot
-    runtime: docker
-    plan: free
+    env: docker
+    dockerfilePath: ./Dockerfile
     autoDeploy: true
-
+    plan: free
+    buildCommand: ""
+    startCommand: ""
     envVars:
       - key: BOT_TOKEN
         sync: false
-
     healthCheckPath: /
