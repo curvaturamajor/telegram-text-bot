@@ -42,10 +42,6 @@ func parseMessageLink(link string) (int64, int) {
 	return chatID, msgID
 }
 
-func isTelegramLink(url string) bool {
-	return strings.Contains(url, "t.me") || strings.Contains(url, "telegram.me")
-}
-
 func main() {
 	token := os.Getenv("BOT_TOKEN")
 	bot, _ := tgbotapi.NewBotAPI(token)
@@ -65,20 +61,14 @@ func main() {
 		m := update.Message
 		uid := m.From.ID
 
-		// 1️⃣ OTOMATİK LİNK SİLME
-		if targetUsers[uid] {
-			hasTGLink := false
-			for _, entity := range m.Entities {
-				if entity.Type == "url" {
-					link := string([]rune(m.Text)[entity.Offset : entity.Offset+entity.Length])
-					if isTelegramLink(link) { hasTGLink = true; break }
-				}
-				if entity.Type == "text_link" && isTelegramLink(entity.URL) { hasTGLink = true; break }
-			}
-			if hasTGLink {
+		// 1️⃣ OTOMATİK LİNK SİLME (SADECE CAPTION VE TARGET USERS)
+		// Performans: Sadece hedef kullanıcı ve medya açıklaması varsa 't.me/' kontrolü yapılır.
+		if targetUsers[uid] && m.Caption != "" {
+			if strings.Contains(m.Caption, "t.me/") {
 				go func(cID int64, mID int) {
 					time.Sleep(7 * time.Minute)
 					bot.Request(tgbotapi.DeleteMessageConfig{ChatID: cID, MessageID: mID})
+					
 					warn := tgbotapi.NewMessage(cID, "Yasaklı görsel kaldırıldı")
 					if sentWarn, err := bot.Send(warn); err == nil {
 						time.Sleep(30 * time.Second)
