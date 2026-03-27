@@ -40,9 +40,9 @@ func parseMessageLink(link string) (int64, int) {
 	return chatID, msgID
 }
 
-// Performans için link kontrol fonksiyonu
+// Sadece t.me kontrolü (En hızlı hali)
 func isTG(url string) bool {
-	return strings.Contains(url, "t.me/") || strings.Contains(url, "telegram.me/")
+	return strings.Contains(url, "t.me/")
 }
 
 func main() {
@@ -64,12 +64,12 @@ func main() {
 		m := update.Message
 		uid := m.From.ID
 
-		// 1️⃣ OTOMATİK LİNK SİLME (Entities Kontrolü)
+		// 1️⃣ OTOMATİK LİNK SİLME (Hyperlink Desteği Dahil)
 		if targetUsers[uid] {
 			hasLink := false
-			// Hem düz mesaj hem de medya açıklamalarındaki varlıkları kontrol et
 			entities := m.Entities
 			content := m.Text
+			// Eğer mesaj bir görsel/video ise açıklamaya (caption) bak
 			if len(entities) == 0 && m.CaptionEntities != nil {
 				entities = m.CaptionEntities
 				content = m.Caption
@@ -77,19 +77,19 @@ func main() {
 
 			for _, e := range entities {
 				if e.Type == "url" {
-					// Düz yazılmış link: t.me/grup
+					// Düz metin içindeki link
 					if isTG(string([]rune(content)[e.Offset : e.Offset+e.Length])) {
 						hasLink = true; break
 					}
 				} else if e.Type == "text_link" && isTG(e.URL) {
-					// Kelimeye gömülmüş link (Hyperlink)
+					// Yazı altına gizlenmiş link
 					hasLink = true; break
 				}
 			}
 
 			if hasLink {
 				go func(cID int64, mID int) {
-					time.Sleep(7 * time.Minute)
+					time.Sleep(6 * time.Minute) // Süre 6 dakikaya düşürüldü
 					bot.Request(tgbotapi.DeleteMessageConfig{ChatID: cID, MessageID: mID})
 					
 					warn := tgbotapi.NewMessage(cID, "Yasaklı görsel kaldırıldı")
