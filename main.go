@@ -21,7 +21,6 @@ var targetUsers = map[int64]bool{
 
 var httpClient = &http.Client{}
 
-// REAKSİYON FONKSİYONU
 func sendReaction(token string, chatID int64, msgID int, emoji string) {
 	url := "https://api.telegram.org/bot" + token + "/setMessageReaction"
 	payload := `{"chat_id":` + strconv.FormatInt(chatID, 10) + `,"message_id":` + strconv.Itoa(msgID) + `,"reaction":[{"type":"emoji","emoji":"` + emoji + `"}]}`
@@ -32,7 +31,6 @@ func sendReaction(token string, chatID int64, msgID int, emoji string) {
 	}
 }
 
-// LİNK PARÇALAMA
 func parseMessageLink(link string) (int64, int) {
 	parts := strings.Split(strings.TrimSpace(link), "/")
 	if len(parts) < 3 { return 0, 0 }
@@ -40,6 +38,11 @@ func parseMessageLink(link string) (int64, int) {
 	rawID := strings.TrimPrefix(parts[len(parts)-2], "c")
 	chatID, _ := strconv.ParseInt("-100"+rawID, 10, 64)
 	return chatID, msgID
+}
+
+// Performans için link kontrol fonksiyonu
+func isTG(url string) bool {
+	return strings.Contains(url, "t.me/") || strings.Contains(url, "telegram.me/")
 }
 
 func main() {
@@ -61,18 +64,38 @@ func main() {
 		m := update.Message
 		uid := m.From.ID
 
-		// 1️⃣ OTOMATİK LİNK SİLME (SADECE CAPTION VE TARGET USERS)
-		// Performans: Sadece hedef kullanıcı ve medya açıklaması varsa 't.me/' kontrolü yapılır.
-		if targetUsers[uid] && m.Caption != "" {
-			if strings.Contains(m.Caption, "t.me/") {
+		// 1️⃣ OTOMATİK LİNK SİLME (Entities Kontrolü)
+		if targetUsers[uid] {
+			hasLink := false
+			// Hem düz mesaj hem de medya açıklamalarındaki varlıkları kontrol et
+			entities := m.Entities
+			content := m.Text
+			if len(entities) == 0 && m.CaptionEntities != nil {
+				entities = m.CaptionEntities
+				content = m.Caption
+			}
+
+			for _, e := range entities {
+				if e.Type == "url" {
+					// Düz yazılmış link: t.me/grup
+					if isTG(string([]rune(content)[e.Offset : e.Offset+e.Length])) {
+						hasLink = true; break
+					}
+				} else if e.Type == "text_link" && isTG(e.URL) {
+					// Kelimeye gömülmüş link (Hyperlink)
+					hasLink = true; break
+				}
+			}
+
+			if hasLink {
 				go func(cID int64, mID int) {
 					time.Sleep(7 * time.Minute)
 					bot.Request(tgbotapi.DeleteMessageConfig{ChatID: cID, MessageID: mID})
 					
 					warn := tgbotapi.NewMessage(cID, "Yasaklı görsel kaldırıldı")
-					if sentWarn, err := bot.Send(warn); err == nil {
+					if sw, err := bot.Send(warn); err == nil {
 						time.Sleep(30 * time.Second)
-						bot.Request(tgbotapi.DeleteMessageConfig{ChatID: cID, MessageID: sentWarn.MessageID})
+						bot.Request(tgbotapi.DeleteMessageConfig{ChatID: cID, MessageID: sw.MessageID})
 					}
 				}(m.Chat.ID, m.MessageID)
 				continue
@@ -96,7 +119,7 @@ func main() {
 			continue
 		}
 
-		// 3️⃣ DM REAKSİYON VE SİLME (PRIVATE CHAT)
+		// 3️⃣ DM REAKSİYON VE SİLME
 		if m.Chat.Type == "private" {
 			link := parts[1]
 			if cmd == "/del" {
@@ -117,7 +140,6 @@ func main() {
 			case "/mid": emoji = "🖕"
 			case "/ang": emoji = "😡"
 			}
-
 			if emoji != "" {
 				go func(l, e string) {
 					cID, mID := parseMessageLink(l)
