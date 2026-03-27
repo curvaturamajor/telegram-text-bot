@@ -1,5 +1,5 @@
-use axum::{routing::post, Router, Json, response::IntoResponse, http::StatusCode};
-use serde::{Deserialize, Serialize};
+use axum::{routing::{get, post}, Router, Json, response::IntoResponse, http::StatusCode};
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::env;
 use std::sync::Arc;
@@ -38,6 +38,7 @@ struct Message {
 struct User { id: i64 }
 #[derive(Deserialize, Debug, Clone)]
 struct Chat { id: i64 }
+
 #[derive(Deserialize, Debug, Clone)]
 struct Entity {
     #[serde(rename = "type")]
@@ -57,14 +58,17 @@ async fn main() {
     let token = env::var("BOT_TOKEN").expect("BOT_TOKEN set edilmeli");
     let port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     
-    let state = Arc::new(AppState {
-        token,
-        client: reqwest::Client::new(),
-    });
+    // Bağlantı havuzunu ve TCP optimizasyonlarını içeren istemci
+    let client = reqwest::Client::builder()
+        .tcp_nodelay(true)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let state = Arc::new(AppState { token, client });
 
     let app = Router::new()
         .route("/webhook", post(handle_webhook))
-        .route("/", axum::routing::get(|| async { "OK" }))
+        .route("/", get(|| async { "OK" }))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
@@ -81,20 +85,18 @@ async fn handle_webhook(
             let uid = from.id;
             let state_cloned = Arc::clone(&state);
 
-            // 1. LİNK SİLME MANTIĞI
+            // 1. LİNK SİLME MANTIĞI (Ultra-Performance)
             if TARGET_USERS.contains(&uid) {
                 let content = m.text.as_deref().or(m.caption.as_deref()).unwrap_or("");
                 let entities = m.entities.as_ref().or(m.caption_entities.as_ref());
 
                 let mut has_link = false;
                 if let Some(ents) = entities {
-                    let chars: Vec<char> = content.chars().collect();
                     for e in ents {
                         if e.entity_type == "url" {
-                            if e.offset + e.length <= chars.len() {
-                                let part: String = chars[e.offset..e.offset + e.length].iter().collect();
-                                if part.contains("t.me/") { has_link = true; break; }
-                            }
+                            // Bellek ayırmadan iterator üzerinden güvenli kontrol
+                            let part: String = content.chars().skip(e.offset).take(e.length).collect();
+                            if part.contains("t.me/") { has_link = true; break; }
                         } else if e.entity_type == "text_link" {
                             if let Some(url) = &e.url {
                                 if url.contains("t.me/") { has_link = true; break; }
@@ -129,7 +131,7 @@ async fn handle_webhook(
                 }
             }
 
-            // 2. KOMUTLAR
+            // 2. KOMUTLAR (Owner Only)
             if uid == OWNER_ID {
                 if let Some(text) = &m.text {
                     if text.starts_with('/') {
@@ -142,7 +144,7 @@ async fn handle_webhook(
                             let chat_id = m.chat.id;
                             let reply_text = parts[1].to_string();
                             tokio::spawn(async move {
-                                api_request(&st, "sendMessage", serde_json::json!({
+                                let _ = api_request(&st, "sendMessage", serde_json::json!({
                                     "chat_id": chat_id, "text": reply_text, "reply_to_message_id": r_id
                                 })).await;
                             });
@@ -157,7 +159,7 @@ async fn handle_webhook(
                                 if cmd == "/del" {
                                     let st = Arc::clone(&state);
                                     tokio::spawn(async move {
-                                        api_request(&st, "deleteMessage", serde_json::json!({"chat_id": c_id, "message_id": m_id})).await;
+                                        let _ = api_request(&st, "deleteMessage", serde_json::json!({"chat_id": c_id, "message_id": m_id})).await;
                                     });
                                 } else {
                                     let emoji = match cmd {
@@ -168,7 +170,7 @@ async fn handle_webhook(
                                     if !emoji.is_empty() {
                                         let st = Arc::clone(&state);
                                         tokio::spawn(async move {
-                                            api_request(&st, "setMessageReaction", serde_json::json!({
+                                            let _ = api_request(&st, "setMessageReaction", serde_json::json!({
                                                 "chat_id": c_id, "message_id": m_id,
                                                 "reaction": [{"type": "emoji", "emoji": emoji}]
                                             })).await;
