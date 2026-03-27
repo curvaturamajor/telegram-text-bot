@@ -18,29 +18,42 @@ var targetUsers = map[int64]bool{
 	6097954079: true, 8126159172: true, 7776852074: true,
 }
 
-// Ultra-hafif JSON yapıları
+// JSON Yapıları (Büyük harfle başlamalı!)
 type Update struct {
 	Message *Message `json:"message"`
 }
 
 type Message struct {
-	MessageID int             `json:"message_id"`
-	From      *User           `json:"from"`
-	Chat      Chat            `json:"chat"`
-	Text      string          `json:"text"`
-	Caption   string          `json:"caption"`
-	Entities  []Entity        `json:"entities"`
-	CEntities []Entity        `json:"caption_entities"`
-	ReplyTo   *Message        `json:"reply_to_message"`
+	MessageID int      `json:"message_id"`
+	From      *User    `json:"from"`
+	Chat      Chat     `json:"chat"`
+	Text      string   `json:"text"`
+	Caption   string   `json:"caption"`
+	Entities  []Entity `json:"entities"`
+	CEntities []Entity `json:"caption_entities"`
+	ReplyTo   *Message `json:"reply_to_message"`
 }
 
-type User struct { ID int64 `json:"id"` }
-type Chat struct { ID int64 `json:"id"; Type string "json:"type"` }
-type Entity struct { Type string `json:"type"; Offset int "json:"offset"; Length int "json:"length"; URL string "json:"url"` }
+type User struct {
+	ID int64 `json:"id"`
+}
+
+type Chat struct {
+	ID   int64  `json:"id"`
+	Type string `json:"type"`
+}
+
+type Entity struct {
+	Type   string `json:"type"`
+	Offset int    `json:"offset"`
+	Length int    `json:"length"`
+	URL    string `json:"url"`
+}
 
 var httpClient = &http.Client{
 	Transport: &http.Transport{
-		MaxIdleConns: 100, IdleConnTimeout: 90 * time.Second,
+		MaxIdleConns:    100,
+		IdleConnTimeout: 90 * time.Second,
 	},
 }
 
@@ -57,13 +70,14 @@ func apiRequest(token, method string, data interface{}) {
 func main() {
 	token := os.Getenv("BOT_TOKEN")
 	port := os.Getenv("PORT")
+	if port == "" { port = "8080" }
 
 	http.HandleFunc("/webhook", func(w http.ResponseWriter, r *http.Request) {
 		var u Update
 		if err := json.NewDecoder(r.Body).Decode(&u); err != nil || u.Message == nil || u.Message.From == nil {
 			return
 		}
-		
+
 		m := u.Message
 		uid := m.From.ID
 
@@ -77,9 +91,15 @@ func main() {
 			}
 
 			hasLink := false
+			runes := []rune(content)
 			for _, e := range entities {
-				if e.Type == "url" && strings.Contains(content[e.Offset:e.Offset+e.Length], "t.me/") {
-					hasLink = true; break
+				if e.Type == "url" {
+					// Index out of range hatasını önlemek için güvenli slice
+					if e.Offset+e.Length <= len(runes) {
+						if strings.Contains(string(runes[e.Offset:e.Offset+e.Length]), "t.me/") {
+							hasLink = true; break
+						}
+					}
 				} else if e.Type == "text_link" && strings.Contains(e.URL, "t.me/") {
 					hasLink = true; break
 				}
@@ -89,17 +109,23 @@ func main() {
 				go func(cID int64, mID int) {
 					time.Sleep(6 * time.Minute)
 					apiRequest(token, "deleteMessage", map[string]interface{}{"chat_id": cID, "message_id": mID})
-					
-					// Uyarı gönder ve 30s sonra sil (Opsiyonel: Daha da hız için bu kısmı raw yapabilirsin)
+
+					// Uyarı gönder
 					url := "https://api.telegram.org/bot" + token + "/sendMessage"
 					warnData := map[string]interface{}{"chat_id": cID, "text": "Yasaklı görsel kaldırıldı"}
 					p, _ := json.Marshal(warnData)
 					if resp, err := httpClient.Post(url, "application/json", bytes.NewReader(p)); err == nil {
-						var res struct { Result struct { MessageID int `json:"message_id"` } `json:"result"` }
+						var res struct {
+							Result struct {
+								MessageID int `json:"message_id"`
+							} `json:"result"`
+						}
 						json.NewDecoder(resp.Body).Decode(&res)
 						resp.Body.Close()
-						time.Sleep(30 * time.Second)
-						apiRequest(token, "deleteMessage", map[string]interface{}{"chat_id": cID, "message_id": res.Result.MessageID})
+						if res.Result.MessageID != 0 {
+							time.Sleep(30 * time.Second)
+							apiRequest(token, "deleteMessage", map[string]interface{}{"chat_id": cID, "message_id": res.Result.MessageID})
+						}
 					}
 				}(m.Chat.ID, m.MessageID)
 				return
@@ -117,36 +143,40 @@ func main() {
 				go apiRequest(token, "sendMessage", map[string]interface{}{
 					"chat_id": m.Chat.ID, "text": parts[1], "reply_to_message_id": rID,
 				})
-			} else if len(parts) > 1 { // DM İşlemleri
+			} else if len(parts) > 1 {
 				link := parts[1]
-				if cmd == "/del" {
-					go func(l string) {
-						p := strings.Split(l, "/")
-						mID, _ := strconv.Atoi(p[len(p)-1])
-						cID, _ := strconv.ParseInt("-100"+strings.TrimPrefix(p[len(p)-2], "c"), 10, 64)
-						apiRequest(token, "deleteMessage", map[string]interface{}{"chat_id": cID, "message_id": mID})
-					}(link)
-				} else {
-					var emoji string
-					switch cmd {
-					case "/love": emoji = "❤️"
-					case "/like": emoji = "👍"
-					case "/dislike": emoji = "👎"
-					}
-					if emoji != "" {
-						go func(l, e string) {
-							p := strings.Split(l, "/")
-							mID, _ := strconv.Atoi(p[len(p)-1])
-							cID, _ := strconv.ParseInt("-100"+strings.TrimPrefix(p[len(p)-2], "c"), 10, 64)
-							url := "https://api.telegram.org/bot" + token + "/setMessageReaction"
-							payload := `{"chat_id":` + strconv.FormatInt(cID, 10) + `,"message_id":` + strconv.Itoa(mID) + `,"reaction":[{"type":"emoji","emoji":"` + e + `"}]}`
-							httpClient.Post(url, "application/json", strings.NewReader(payload))
-						}(link, emoji)
+				p := strings.Split(strings.TrimSpace(link), "/")
+				if len(p) >= 3 {
+					mID, _ := strconv.Atoi(p[len(p)-1])
+					cID, _ := strconv.ParseInt("-100"+strings.TrimPrefix(p[len(p)-2], "c"), 10, 64)
+
+					if cmd == "/del" {
+						go apiRequest(token, "deleteMessage", map[string]interface{}{"chat_id": cID, "message_id": mID})
+					} else {
+						var emoji string
+						switch cmd {
+						case "/love": emoji = "❤️"
+						case "/like": emoji = "👍"
+						case "/dislike": emoji = "👎"
+						case "/poop": emoji = "💩"
+						case "/lol": emoji = "😁"
+						case "/mid": emoji = "🖕"
+						case "/ang": emoji = "😡"
+						}
+						if emoji != "" {
+							go func(e string) {
+								url := "https://api.telegram.org/bot" + token + "/setMessageReaction"
+								payload := `{"chat_id":` + strconv.FormatInt(cID, 10) + `,"message_id":` + strconv.Itoa(mID) + `,"reaction":[{"type":"emoji","emoji":"` + e + `"}]}`
+								res, _ := httpClient.Post(url, "application/json", strings.NewReader(payload))
+								if res != nil { res.Body.Close() }
+							}(emoji)
+						}
 					}
 				}
 			}
 		}
 	})
 
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
 	http.ListenAndServe(":"+port, nil)
 }
