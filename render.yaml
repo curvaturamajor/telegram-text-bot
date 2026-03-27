@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: telegram-text-bot
+    env: static            # Rust binary için native runtime
+    autoDeploy: true
+    plan: free             # Ücretsiz plan, istersen değiştirilebilir
+    buildCommand: cargo build --release
+    startCommand: ./target/release/telegram_bot
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+    healthCheckPath: /
