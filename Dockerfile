@@ -1,4 +1,4 @@
-FROM rust:1.75 as builder
+FROM rust:1.84 as builder
 
 WORKDIR /app
 COPY . .
@@ -10,6 +10,6 @@ FROM debian:bookworm-slim
 WORKDIR /app
 COPY --from=builder /app/target/release/telegram_bot .
 
-EXPOSE 8080
+ENV PORT=8080
 
 CMD ["./telegram_bot"]
