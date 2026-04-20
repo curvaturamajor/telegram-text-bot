@@ -133,7 +133,6 @@ async fn handle_webhook(
                         let st = Arc::clone(&state);
                         
                         if chat_id == TARGET_GROUP_ID {
-                            // FAST PATH: Grupta sadece mesajın sonrasını al ve yanıtla
                             let reply_id = m.reply_to_message.as_ref().map(|rm| rm.message_id);
                             let reply_text = text[4..].to_string();
                             if !reply_text.is_empty() {
@@ -144,7 +143,6 @@ async fn handle_webhook(
                                 });
                             }
                         } else if chat_id == uid {
-                            // PM PATH: Link analizi yaparak yönlendir
                             let parts: Vec<&str> = text.splitn(3, ' ').collect();
                             let mut final_text = String::new();
                             let mut reply_id: Option<i32> = None;
@@ -167,29 +165,51 @@ async fn handle_webhook(
                             }
                         }
                     } 
-                    // --- /gift KOMUTU ---
+                    // --- /gift KOMUTU (Gelişmiş İsim Çekme ve Etiketleme) ---
                     else if text.starts_with("/gift") {
                         let parts: Vec<&str> = text.split_whitespace().collect();
                         if parts.len() >= 3 {
                             if let Some(reply) = &m.reply_to_message {
-                                let gift_text = format!("🎁 {}'den {}'ye armağan edilmiştir.", parts[1], parts[2]);
                                 let st = Arc::clone(&state);
+                                let from_id_raw = parts[1].to_string();
+                                let to_id_raw = parts[2].to_string();
                                 let orig_msg_id = reply.message_id;
                                 let orig_chat_id = m.chat.id;
+
                                 tokio::spawn(async move {
-                                    let copy_res = api_request(&st, "copyMessage", serde_json::json!({
-                                        "chat_id": TARGET_GROUP_ID, "from_chat_id": orig_chat_id, "message_id": orig_msg_id
-                                    })).await;
-                                    if copy_res.is_ok() {
-                                        let _ = api_request(&st, "sendMessage", serde_json::json!({
-                                            "chat_id": TARGET_GROUP_ID, "text": gift_text
-                                        })).await;
+                                    let mut from_name = from_id_raw.clone();
+                                    let mut to_name = to_id_raw.clone();
+
+                                    // Gönderen ismini çek
+                                    if let Ok(resp) = api_request(&st, "getChatMember", serde_json::json!({"chat_id": TARGET_GROUP_ID, "user_id": from_id_raw.parse::<i64>().unwrap_or(0)})).await {
+                                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&resp) {
+                                            if let Some(fnm) = val["result"]["user"]["first_name"].as_str() { from_name = fnm.to_string(); }
+                                        }
                                     }
+                                    // Alıcı ismini çek
+                                    if let Ok(resp) = api_request(&st, "getChatMember", serde_json::json!({"chat_id": TARGET_GROUP_ID, "user_id": to_id_raw.parse::<i64>().unwrap_or(0)})).await {
+                                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&resp) {
+                                            if let Some(tnm) = val["result"]["user"]["first_name"].as_str() { to_name = tnm.to_string(); }
+                                        }
+                                    }
+
+                                    let gift_caption = format!(
+                                        "<a href=\"tg://user?id={}\">{}</a>'den <a href=\"tg://user?id={}\">{}</a>'ye armağan edilmiştir.", 
+                                        from_id_raw, from_name, to_id_raw, to_name
+                                    );
+
+                                    let _ = api_request(&st, "copyMessage", serde_json::json!({
+                                        "chat_id": TARGET_GROUP_ID,
+                                        "from_chat_id": orig_chat_id,
+                                        "message_id": orig_msg_id,
+                                        "caption": gift_caption,
+                                        "parse_mode": "HTML"
+                                    })).await;
                                 });
                             }
                         }
                     }
-                    // --- DİĞER KOMUTLAR (/del, /like vb.) ---
+                    // --- DİĞER KOMUTLAR ---
                     else if text.starts_with('/') {
                         let parts: Vec<&str> = text.splitn(2, ' ').collect();
                         let cmd = parts[0];
