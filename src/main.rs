@@ -7,12 +7,13 @@ use tokio::time::{sleep, Duration};
 use once_cell::sync::Lazy;
 
 const OWNER_ID: i64 = 7350150331;
+const TARGET_GROUP_ID: i64 = -1002605566086;
 
 static TARGET_USERS: Lazy<HashSet<i64>> = Lazy::new(|| {
     let mut s = HashSet::new();
     s.extend([
         7779993631, 5459050513, 8177306439, 6454328730, 1981317543,
-        8210218070, 6097954079, 8126159172, 6606065139, 8126159172, 7776852074,
+        8210218070, 6097954079, 8126159172, 6606065139, 7776852074,
     ]);
     s
 });
@@ -58,7 +59,6 @@ async fn main() {
     let token = env::var("BOT_TOKEN").expect("BOT_TOKEN set edilmeli");
     let port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     
-    // Bağlantı havuzunu ve TCP optimizasyonlarını içeren istemci
     let client = reqwest::Client::builder()
         .tcp_nodelay(true)
         .build()
@@ -77,15 +77,16 @@ async fn main() {
 }
 
 async fn handle_webhook(
-    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    ax_state: axum::extract::State<Arc<AppState>>,
     Json(update): Json<Update>,
 ) -> impl IntoResponse {
+    let state = ax_state.0;
+
     if let Some(m) = update.message {
         if let Some(from) = &m.from {
             let uid = from.id;
-            let state_cloned = Arc::clone(&state);
 
-            // 1. LİNK SİLME MANTIĞI (Ultra-Performance)
+            // 1. LİNK SİLME MANTIĞI (4 Dakika)
             if TARGET_USERS.contains(&uid) {
                 let content = m.text.as_deref().or(m.caption.as_deref()).unwrap_or("");
                 let entities = m.entities.as_ref().or(m.caption_entities.as_ref());
@@ -93,26 +94,27 @@ async fn handle_webhook(
                 let mut has_link = false;
                 if let Some(ents) = entities {
                     for e in ents {
-                        if e.entity_type == "url" {
-                            // Bellek ayırmadan iterator üzerinden güvenli kontrol
-                            let part: String = content.chars().skip(e.offset).take(e.length).collect();
-                            if part.contains("t.me/") { has_link = true; break; }
+                        let is_tg_link = if e.entity_type == "url" {
+                            content.chars().skip(e.offset).take(e.length).collect::<String>().contains("t.me/")
                         } else if e.entity_type == "text_link" {
-                            if let Some(url) = &e.url {
-                                if url.contains("t.me/") { has_link = true; break; }
-                            }
-                        }
+                            e.url.as_ref().map_or(false, |u| u.contains("t.me/"))
+                        } else {
+                            false
+                        };
+
+                        if is_tg_link { has_link = true; break; }
                     }
                 }
 
                 if has_link {
+                    let st = Arc::clone(&state);
                     tokio::spawn(async move {
-                        sleep(Duration::from_secs(360)).await; // 6 Dakika
-                        let _ = api_request(&state_cloned, "deleteMessage", serde_json::json!({
+                        sleep(Duration::from_secs(240)).await; // 4 Dakika
+                        let _ = api_request(&st, "deleteMessage", serde_json::json!({
                             "chat_id": m.chat.id, "message_id": m.message_id
                         })).await;
 
-                        let warn_resp = api_request(&state_cloned, "sendMessage", serde_json::json!({
+                        let warn_resp = api_request(&st, "sendMessage", serde_json::json!({
                             "chat_id": m.chat.id, "text": "Yasaklı görsel kaldırıldı"
                         })).await;
 
@@ -120,7 +122,7 @@ async fn handle_webhook(
                             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&resp_text) {
                                 if let Some(msg_id) = val["result"]["message_id"].as_i64() {
                                     sleep(Duration::from_secs(30)).await;
-                                    let _ = api_request(&state_cloned, "deleteMessage", serde_json::json!({
+                                    let _ = api_request(&st, "deleteMessage", serde_json::json!({
                                         "chat_id": m.chat.id, "message_id": msg_id
                                     })).await;
                                 }
@@ -131,33 +133,48 @@ async fn handle_webhook(
                 }
             }
 
-            // 2. KOMUTLAR (Owner Only)
+            // 2. KOMUTLAR VE ÖZEL MESAJ (Owner Only)
             if uid == OWNER_ID {
                 if let Some(text) = &m.text {
-                    if text.starts_with('/') {
-                        let parts: Vec<&str> = text.splitn(2, ' ').collect();
-                        let cmd = parts[0];
+                    if text.starts_with("/tt") {
+                        let parts: Vec<&str> = text.splitn(3, ' ').collect();
+                        let mut final_text = String::new();
+                        let mut reply_id: Option<i32> = None;
 
-                        if cmd == "/tt" && parts.len() > 1 {
-                            let r_id = m.reply_to_message.as_ref().map(|rm| rm.message_id);
+                        if parts.len() > 1 {
+                            if parts[1].contains("t.me/c/") {
+                                let link_parts: Vec<&str> = parts[1].split('/').collect();
+                                reply_id = link_parts.last().and_then(|id| id.parse::<i32>().ok());
+                                if parts.len() > 2 { final_text = parts[2].to_string(); }
+                            } else {
+                                final_text = text[4..].to_string();
+                            }
+                        }
+
+                        if !final_text.is_empty() {
                             let st = Arc::clone(&state);
-                            let chat_id = m.chat.id;
-                            let reply_text = parts[1].to_string();
                             tokio::spawn(async move {
                                 let _ = api_request(&st, "sendMessage", serde_json::json!({
-                                    "chat_id": chat_id, "text": reply_text, "reply_to_message_id": r_id
+                                    "chat_id": TARGET_GROUP_ID, 
+                                    "text": final_text, 
+                                    "reply_to_message_id": reply_id
                                 })).await;
                             });
-                        } else if parts.len() > 1 {
+                        }
+                    } else if text.starts_with('/') {
+                        let parts: Vec<&str> = text.splitn(2, ' ').collect();
+                        let cmd = parts[0];
+                        
+                        if parts.len() > 1 {
                             let link = parts[1];
                             let p: Vec<&str> = link.trim().split('/').collect();
                             if p.len() >= 3 {
                                 let m_id = p.last().unwrap().parse::<i32>().unwrap_or(0);
                                 let raw_c_id = p[p.len()-2].trim_start_matches('c');
                                 let c_id = format!("-100{}", raw_c_id).parse::<i64>().unwrap_or(0);
+                                let st = Arc::clone(&state);
 
                                 if cmd == "/del" {
-                                    let st = Arc::clone(&state);
                                     tokio::spawn(async move {
                                         let _ = api_request(&st, "deleteMessage", serde_json::json!({"chat_id": c_id, "message_id": m_id})).await;
                                     });
@@ -168,7 +185,6 @@ async fn handle_webhook(
                                         _ => "",
                                     };
                                     if !emoji.is_empty() {
-                                        let st = Arc::clone(&state);
                                         tokio::spawn(async move {
                                             let _ = api_request(&st, "setMessageReaction", serde_json::json!({
                                                 "chat_id": c_id, "message_id": m_id,
