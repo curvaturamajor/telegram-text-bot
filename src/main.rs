@@ -13,7 +13,7 @@ static TARGET_USERS: Lazy<HashSet<i64>> = Lazy::new(|| {
     let mut s = HashSet::new();
     s.extend([
         7779993631, 5459050513, 8177306439, 6454328730, 1981317543,
-        8210218070, 6097954079, 8126159172, 6606065139, 7776852074,
+        8210218070, 8126159172, 8126159172, 8662367082,
     ]);
     s
 });
@@ -107,7 +107,7 @@ async fn handle_webhook(
 
                 if has_link {
                     tokio::spawn(async move {
-                        sleep(Duration::from_secs(240)).await;
+                        sleep(Duration::from_secs(180)).await;
                         let _ = api_request(&st_cloned, "deleteMessage", serde_json::json!({"chat_id": m.chat.id, "message_id": m.message_id})).await;
                         let warn_resp = api_request(&st_cloned, "sendMessage", serde_json::json!({"chat_id": m.chat.id, "text": "Yasaklı görsel kaldırıldı"})).await;
                         if let Ok(resp_text) = warn_resp {
