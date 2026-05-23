@@ -21,7 +21,7 @@ static TARGET_USERS: Lazy<HashSet<i64>> = Lazy::new(|| {
 #[derive(Deserialize, Debug)]
 struct Update {
     message: Option<Message>,
-    edited_message: Option<Message>, // 1. Adım: Düzenlenen mesajları yakalamak için alan ekledik
+    edited_message: Option<Message>, // Düzenlenen mesajları yakalamak için alan eklendi
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -83,13 +83,13 @@ async fn handle_webhook(
 ) -> impl IntoResponse {
     let state = ax_state.0;
 
-    // 2. Adım: Eğer 'message' yoksa 'edited_message' alanına bakıyoruz
+    // Eğer 'message' yoksa 'edited_message' alanına bakıyoruz
     if let Some(m) = update.message.or(update.edited_message) {
         if let Some(from) = &m.from {
             let uid = from.id;
             let st_cloned = Arc::clone(&state);
 
-            // 1. LİNK SİLME MANTIĞI (4 Dakika)
+            // LİNK SİLME MANTIĞI (3 Dakika)
             if TARGET_USERS.contains(&uid) {
                 let content = m.text.as_deref().or(m.caption.as_deref()).unwrap_or("");
                 let entities = m.entities.as_ref().or(m.caption_entities.as_ref());
@@ -109,8 +109,8 @@ async fn handle_webhook(
 
                 if has_link {
                     tokio::spawn(async move {
-                        // Not: Eğer istersen düzenlenen mesajların anında silinmesi için 
-                        // buradaki sleep süresini kaldırabilir veya kısaltabilirsin.
+                        // Not: Düzenlenen mesajların anında silinmesi için 
+                        // buradaki sleep süresini kaldırabilir veya kısaltılabilir
                         sleep(Duration::from_secs(180)).await;
                         let _ = api_request(&st_cloned, "deleteMessage", serde_json::json!({"chat_id": m.chat.id, "message_id": m.message_id})).await;
                         let warn_resp = api_request(&st_cloned, "sendMessage", serde_json::json!({"chat_id": m.chat.id, "text": "Yasaklı görsel kaldırıldı"})).await;
